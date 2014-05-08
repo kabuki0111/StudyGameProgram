@@ -2,8 +2,8 @@
 #define WIN32_LEAN_AND_MEAN
 
 #include <Windows.h>
-#include <stdlib.h>				//メモリリークを検出のため
-#include <crtdbg.h>				//メモリリークを検出のため
+#include <stdlib.h>	//メモリリークを検出のため
+#include <crtdbg.h>	//メモリリークを検出のため
 #include "graphics.h"
 
 //関数プロトタイプ
@@ -36,150 +36,61 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
 #endif
 	MSG msg;
-	HWND hawnd = NULL;
+	HWND hwnd = NULL;
 
 	//ウィンドウを作成
 	if (!CreateMainWindow(hInstance, nCmdShow)){
-		return false;
+		return 1;
 	}
+	
+	try{
+		//Graphicsオブジェクトを作成
+		graphics = new Graphics;
+		//Graphicsを初期化、GameErrorをスロー
+		graphics->initialize(hwnd, GAME_WIDTH, GAME_HEIGHT, FULLSCREEN);
 
-	for (int i = 0; i < 256; i++){
-		vkKeys[i] = false;
-	}
-
-	//メインのメッセージループ
-	int done = 0;
-	while (!done){
-		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)){
-			//終了メッセージを検知
-			if (msg.message == WM_QUIT){
-				done = 1;
+		int done = 0;
+		while (!done){
+			//PeekMessage, Windowsメッセージがないかをチェックする非ブロックメソッド
+			if (PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE)){
+				//終了メッセージを検知
+				if (msg.message == WM_QUIT){
+					done = 1;
+				}
+				// メッセージを出コードしてWinProcに渡す
+				TranslateMessage(&msg);
+				DispatchMessage(&msg);
+			}else{
+				graphics->showBackbuffer();
 			}
-			//ウィンドウイベントコールバック関数
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
+			SAFE_DELETE(graphics);
+			return msg.wParam;
 		}
+	}catch (const GameError &err){
+		MessageBox(NULL, err.getMessage(), "Error", MB_OK);
+	}catch (...){
+		MessageBox(NULL, "Unknown error occurred in game.", "Error", MB_OK);
 	}
-	return msg.wParam;
+	SAFE_DELETE(graphics);	//終了の前にメモリを解放
+	return 0;
+
 }
 
+
+//ウィンドウイベントコールバック関数
 LRESULT WINAPI WinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam){
-	short nVirtKey;
-	const short SHIFTED = (short)0x8000;
-	TEXTMETRIC tm;
-	DWORD chWidth = 20;
-	DWORD chHeight = 20;
-
-	switch(msg){
-	case WM_CREATE:
-		hdc = GetDC(hwnd);
-		GetTextMetrics(hdc, &tm);
-		ReleaseDC(hwnd, hdc);
-		chWidth = tm.tmAveCharWidth;
-		chHeight = tm.tmHeight;
-		return 0;
-
-	case WM_DESTROY:
+	switch (msg){
+	case WM_DESTROY:		//Windowsにこのプログラムを終了するように伝える
 		PostQuitMessage(0);
 		return 0;
-
-	case WM_KEYDOWN:
-		vkKeys[wParam] = true;
+	case WM_CHAR:			//キーボードから文字が入力された場合
 		switch (wParam){
-		case VK_SHIFT:
-			nVirtKey = GetKeyState(VK_LSHIFT);
-			if (nVirtKey & SHIFTED){
-				vkKeys[VK_LSHIFT] = true;
-			}
-			nVirtKey = GetKeyState(VK_RSHIFT);
-			if (nVirtKey & SHIFTED){
-				vkKeys[VK_RSHIFT] = true;
-			}
-			break;
-
-		case VK_CONTROL:
-			nVirtKey = GetKeyState(VK_LCONTROL);
-			if (nVirtKey & SHIFTED){
-				vkKeys[VK_LCONTROL] = true;
-			}
-			nVirtKey = GetKeyState(VK_RCONTROL);
-			if (nVirtKey & SHIFTED){
-				vkKeys[VK_RCONTROL] = true;
-			}
+		case ESC_KEY:		//プログラムを終了するキー
+			PostQuitMessage(0);	//Windowsにこのプログラムを終了するように伝える
 			break;
 		}
-		InvalidateRect(hwnd, NULL, TRUE);
-		return 0;
-		break;
-
-	case WM_KEYUP:
-		vkKeys[wParam] = false;
-		switch (wParam){
-		case VK_SHIFT:
-			nVirtKey = GetKeyState(VK_LSHIFT);
-			if (nVirtKey & SHIFTED == 0){
-				vkKeys[VK_LSHIFT] = false;
-			}
-			nVirtKey = GetKeyState(VK_RSHIFT);
-			if (nVirtKey & SHIFTED == 0){
-				vkKeys[VK_RSHIFT] = false;
-			}
-			break;
-
-		case VK_CONTROL:
-			nVirtKey = GetKeyState(VK_LCONTROL);
-			if (nVirtKey & SHIFTED == 0){
-				vkKeys[VK_LCONTROL] = false;
-			}
-			nVirtKey = GetKeyState(VK_RCONTROL);
-			if (nVirtKey & SHIFTED == 0){
-				vkKeys[VK_RCONTROL] = false;
-			}
-			break;
-		}
-		InvalidateRect(hwnd, NULL, TRUE);
-		return 0;
-		break;
-
-	case WM_CHAR:
-		switch (wParam){
-		case 0x08:
-		case 0x09:
-		case 0x0A:
-		case 0x0D:
-		case 0x1B:
-			MessageBeep((UINT)-1);
-			return 0;
-
-		default:
-			ch = (TCHAR)wParam;
-			InvalidateRect(hwnd, NULL, TRUE);
-			return 0;
-
-		}
-
-	case WM_PAINT:
-		hdc = BeginPaint(hwnd, &ps);
-		TextOut(hdc, 0, 0, &ch, 1);
-		
-		for (int r = 0; r < 16; r++){
-			for (int c = 0; c < 16; c++){
-				if (vkKeys[r*16+c]){
-					SetBkMode(hdc, OPAQUE);
-					TextOut(hdc, c*chWidth+chWidth*2, r*chHeight+chHeight*2, "T ", 2);
-				}else{
-					SetBkMode(hdc, TRANSPARENT);
-					TextOut(hdc, c*chWidth+chWidth*2, r*chHeight+chHeight*2, "F ", 2);
-				}
-			}
-		}
-		
-		EndPaint(hwnd, &ps);
-		return 0;
-
-	default:
-		return DefWindowProc(hwnd, msg, wParam, lParam);
 	}
+	return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
 bool CreateMainWindow(HINSTANCE hInstance, int nCmdShow){
